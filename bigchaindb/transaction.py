@@ -1,8 +1,9 @@
 from enum import Enum
 from uuid import uuid4
+from copy import deepcopy
 
 from cryptoconditions import (
-    Fulfillment,
+    Fulfillment as CCFulfillment,
     ThresholdSha256Fulfillment,
     Ed25519Fulfillment,
 )
@@ -13,9 +14,9 @@ from bigchaindb.exceptions import (
 )
 from bigchaindb.util import (
     get_hash_data,
+    serialize,
     timestamp,
 )
-
 
 
 class TransactionType(Enum):
@@ -53,8 +54,8 @@ class Fulfillment(object):
         return {
             'owners_before': self.owners_before,
             'input': self.tx_input,
-            'fulfillment': self.fulfillment.serialize_uri()
-            'fid': self.fid
+            'fulfillment': self.fulfillment.serialize_uri(),
+            'fid': self.fid,
         }
 
 
@@ -90,7 +91,8 @@ class Condition(object):
 class Transaction(object):
     VERSION = 1
 
-    def __init__(self, fulfillments, conditions, operation, payload=None):
+    def __init__(self, conditions, operation, tx_input=None, fulfillments=None, payload=None):
+        # TODO: Update this comment
         """Create a new transaction in memory
 
         A transaction in BigchainDB is a transfer of a digital asset between two entities represented
@@ -121,6 +123,7 @@ class Transaction(object):
 
         """
         self.operation = operation
+        self.tx_input = tx_input
 
         if fulfillments is None:
             self.fulfillments = []
@@ -154,25 +157,25 @@ class Transaction(object):
         for cid in enumerate(self.conditions):
             # NOTE: This is kinda ugly, but the CC-API doesn't leave us with no other choice at this point
             # NOTE: We could cast condition `to_dict`, but this saves us a serialization step
-            condition_dict = tx_dict['transaction']['conditions'][cid]
-            fulfillment = Fulfillment.from_dict(condition_dict['condition']['details'])
-
             # TODO: Figure out which fulfillments and conditions need to be present for `to_dict`
-            self._add_fulfillment(_fulfill_condition(condition, fulfillment, serialize(self._to_dict()), key_pairs))
+            tx_dict = self._to_dict()
+            condition_dict = tx_dict['transaction']['conditions'][cid]
+            fulfillment = CCFulfillment.from_dict(condition_dict['condition']['details'])
+
+            self._add_fulfillment(self._fulfill_condition(condition_dict, fulfillment, serialize(tx_dict), key_pairs))
 
     def _fulfill_condition(self, condition, fulfillment, tx_serialized, key_pairs):
         owners_before = condition['owners_after']
 
-        if isinstance(parsed_fulfillment, Ed25519Fulfillment):
-            fulfillment = self._fulfill_simple_signature_condition(owners_before, fulfillment, tx_serialized,
+        if isinstance(fulfillment, Ed25519Fulfillment):
+            fulfillment = self._fulfill_simple_signature_condition(owners_before[0], fulfillment, tx_serialized,
                                                                    key_pairs)
-        elif isinstance(parsed_fulfillment, ThresholdSha256Fulfillment):
+        elif isinstance(fulfillment, ThresholdSha256Fulfillment):
             fulfillment = self._fulfill_threshold_signature_condition(owners_before, fulfillment, tx_serialized,
                                                                       key_pairs)
-        # TODO: Where do we get tx_input from?
-        return Fulfillment(fulfillment, owners_before, cid, tx_input)
+        return Fulfillment(fulfillment, owners_before, condition['cid'], self.tx_input)
 
-    def _fulfill_simple_signature_condition(self, owners_before, fulfillment, tx_serialized, key_pairs):
+    def _fulfill_simple_signature_condition(self, owner_before, fulfillment, tx_serialized, key_pairs):
         # TODO: Update comment
         """Fulfill a cryptoconditions.Ed25519Fulfillment
 
@@ -187,13 +190,13 @@ class Transaction(object):
 
         """
         try:
-            fulfillment.sign(tx_serialized, key_pairs[owners_before])
+            fulfillment.sign(tx_serialized, key_pairs[owner_before])
         except KeyError:
             raise KeypairMismatchException('Public key {} is not a pair to any of the private keys'
-                                           .format(current_owner))
+                                           .format(owner_before))
         return fulfillment
 
-    def _fulfill_threshold_signature_fulfillment(owners_before, fulfillment, tx_serialized, key_pairs):
+    def _fulfill_threshold_signature_fulfillment(self, owners_before, fulfillment, tx_serialized, key_pairs):
         # TODO: Update comment
         """Fulfill a cryptoconditions.ThresholdSha256Fulfillment
 
@@ -207,27 +210,27 @@ class Transaction(object):
                 object: fulfilled cryptoconditions.ThresholdSha256Fulfillment
 
             """
-        fulfillment_copy = copy.deepcopy(fulfillment)
+        fulfillment_copy = deepcopy(fulfillment)
         fulfillment.subconditions = []
 
         for owner_before in owners_before:
             try:
-                subfulfillment = parsed_fulfillment_copy.get_subcondition_from_vk(owner_before)[0]
+                subfulfillment = fulfillment_copy.get_subcondition_from_vk(owner_before)[0]
             except IndexError:
                 raise KeypairMismatchException('Public key {} cannot be found in the fulfillment'
-                                               .format(current_owner))
+                                               .format(owner_before))
             try:
                 private_key = key_pairs[owner_before]
             except KeyError:
                 raise KeypairMismatchException('Public key {} is not a pair to any of the private keys'
-                                               .format(current_owner))
+                                               .format(owner_before))
 
             subfulfillment.sign(tx_serialized, private_key)
             fulfillment.add_subfulfillment(subfulfillment)
 
         return fulfillment
 
-    def _add_fulfillment(fulfillment):
+    def _add_fulfillment(self, fulfillment):
         self.fulfillments.append(fulfillment)
 
     def to_dict(self):
