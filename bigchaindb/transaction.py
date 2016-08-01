@@ -1,9 +1,9 @@
-from enum import Enum
 from uuid import uuid4
 from copy import deepcopy
 
 from cryptoconditions import (
     Fulfillment as CCFulfillment,
+    Condition as CCCondition,
     ThresholdSha256Fulfillment,
     Ed25519Fulfillment,
 )
@@ -19,20 +19,8 @@ from bigchaindb.util import (
 )
 
 
-class TransactionType(Enum):
-    CREATE = 0
-    TRANSFER = 1
-
-    # TODO: Is this the correct way of serializing an Enum?
-    def __str__(self):
-        return str(self.name)
-
-    def __repr__(self):
-        return str(self.name)
-
-
 class Fulfillment(object):
-    def __init__(self, fulfillment, owners_before=None, fid=0, tx_input=None):
+    def __init__(self, fulfillment_uri, owners_before=None, fid=0, tx_input=None):
         """Create a new fulfillment
 
         Args:
@@ -42,13 +30,14 @@ class Fulfillment(object):
 
         """
         self.fid = fid
-        self.fulfillment = fulfillment
+        # TODO: should we be able to pass fulfillments objects?
+        self.fulfillment = CCFulfillment.from_uri(fulfillment_uri)
         self.tx_input = tx_input
 
-        if owners_before is None:
-            self.owners_before = []
         if not isinstance(owners_before, list):
-            self.owners_before = [owners_before]
+            raise TypeError('`owners_before` must be a list instance')
+        else:
+            self.owners_before = owners_before
 
     def to_dict(self):
         return {
@@ -58,9 +47,15 @@ class Fulfillment(object):
             'fid': self.fid,
         }
 
+    @classmethod
+    def from_dict(cls, ffill):
+        """ Serializes a BigchainDB 'jsonized' fulfillment back to a BigchainDB Fulfillment class.
+        """
+        return cls(ffill['fulfillment'], ffill['owners_before'], ffill['fid'], ffill['input'])
+
 
 class Condition(object):
-    def __init__(self, condition, owners_after=None, cid=0):
+    def __init__(self, condition_uri, owners_after=None, cid=0):
         """Create a new condition for a fulfillment
 
         Args
@@ -70,28 +65,43 @@ class Condition(object):
 
         """
         self.cid = cid
-        self.condition = condition
+        # TODO: should we be able to pass condition objects?
+        self.condition = CCCondition.from_uri(condition_uri)
 
-        if owners_after is None:
-            self.owners_after = []
         if not isinstance(owners_after, list):
-            self.owners_after = [owners_after]
+            raise TypeError('`owners_after` must be a list instance')
+        else:
+            self.owners_after = owners_after
 
     def to_dict(self):
         return {
             'owners_after': self.owners_after,
             'condition': {
                 'details': self.condition.to_dict(),
-                'uri': self.condition.condition_uri
+                'uri': self.condition.serialize_uri()
             },
             'cid': self.cid
         }
 
+    @classmethod
+    def gen_default_condition(cls, owner_after):
+        """Creates a default condition for a transaction of type `CREATE`.
+        """
+        return cls(Ed25519Fulfillment(public_key=owner_after).condition_uri, [owner_after], 0)
+
+    @classmethod
+    def from_dict(cls, cond):
+        """ Serializes a BigchainDB 'jsonized' condition back to a BigchainDB Condition class.
+        """
+        return cls(cond['condition']['uri'], cond['owners_after'], cond['cid'], )
+
 
 class Transaction(object):
+    CREATE = 'CREATE'
+    TRANSFER = 'TRANSFER'
     VERSION = 1
 
-    def __init__(self, conditions, operation, tx_input=None, fulfillments=None, payload=None):
+    def __init__(self, owners_after, inputs=None, payload=None):
         # TODO: Update this comment
         """Create a new transaction in memory
 
@@ -120,20 +130,36 @@ class Transaction(object):
         Raises:
             TypeError: if the optional ``payload`` argument is not a ``dict``.
 
+        # TODO: Incorporate this text somewhere better in the docs of this class
+        Some use cases for this class:
+
+            1. Create a new `CREATE` transaction:
+                - This means `inputs` is empty
+
+            2. Create a new `TRANSFER` transaction:
+                - This means `inputs` is a filled list (one to multiple transactions)
+
+            3. Written transactions must be managed somehow in the user's program: use `from_dict`
+
 
         """
-        self.operation = operation
-        self.tx_input = tx_input
+        self.fulfillments = []
+        self.conditions = []
+        if not isinstance(owners_after, list):
+            raise TypeError('`owners_after` must be a list instance')
+        else:
+            self.owners_after = owners_after
 
-        if fulfillments is None:
-            self.fulfillments = []
-        if not isinstance(fulfillments, list):
-            self.fulfillments = [fulfillments]
-
-        if conditions is None:
-            self.conditions = []
-        if not isinstance(conditions, list):
-            self.conditions = [conditions]
+        if inputs is not None and not isinstance(inputs, list):
+            raise TypeError('`inputs` must be a list instance or None')
+        elif inputs is None:
+            # If `inputs` is None, this tells us that the user of this class wants to create a
+            # transaction of type `CREATE`
+            self.operation = Transaction.CREATE
+            self._gen_default_condition()
+        else:
+            self.operation = Transaction.TRANSFER
+            self.inputs = inputs
 
         # Check if payload is either None or a dict. Otherwise throw
         if payload is not None and not isinstance(payload, dict):
@@ -141,7 +167,13 @@ class Transaction(object):
         else:
             self.payload = payload
 
-    def fulfill_conditions(self, private_keys):
+    def sign(self, private_keys):
+        """ Signs a transaction by fulfilling the conditions given in the previous transactions.
+            Acts as a proxy for `_fulfill_conditions`, for exposing a nicer API to the outside.
+        """
+        self._fulfill_conditions(private_keys)
+
+    def _fulfill_conditions(self, private_keys):
         if private_keys is None:
             # TODO: Figure out the correct Python error
             raise Exception('`private_keys` cannot be None')
@@ -233,6 +265,9 @@ class Transaction(object):
     def _add_fulfillment(self, fulfillment):
         self.fulfillments.append(fulfillment)
 
+    def _add_condition(self, condition):
+        self.conditions.append(condition)
+
     def to_dict(self):
         return self._to_dict(self.fulfillments, self.conditions)
 
@@ -253,3 +288,7 @@ class Transaction(object):
             'version': self.VERSION,
             'transaction': transaction,
         }
+
+    @classmethod
+    def from_dict(cls, tx):
+        pass
