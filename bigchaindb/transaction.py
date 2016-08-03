@@ -3,35 +3,35 @@ from copy import deepcopy
 
 from cryptoconditions import (
     Fulfillment as CCFulfillment,
-    Condition as CCCondition,
     ThresholdSha256Fulfillment,
     Ed25519Fulfillment,
 )
 
-from bigchaindb.crypto import SigningKey
+from bigchaindb.crypto import (
+    SigningKey,
+    hash_data,
+)
 from bigchaindb.exceptions import (
-    KeypairMismatchException
+    KeypairMismatchException,
 )
 from bigchaindb.util import (
-    get_hash_data,
     serialize,
-    timestamp,
+    # TODO: Rename function in util to `gen_timestamp` or `create_timestamp`
+    timestamp as gen_timestamp,
 )
 
 
 class Fulfillment(object):
-    def __init__(self, fulfillment_uri, owners_before=None, fid=0, tx_input=None):
+    def __init__(self, fulfillment, owners_before=None, fid=0, tx_input=None):
         """Create a new fulfillment
 
         Args:
             # TODO: Write a description here
             owners_before (Optional(list)): base58 encoded public key of the owners of the asset before this
             transaction.
-
         """
         self.fid = fid
-        # TODO: should we be able to pass fulfillments objects?
-        self.fulfillment = CCFulfillment.from_uri(fulfillment_uri)
+        self.fulfillment = fulfillment
         self.tx_input = tx_input
 
         if not isinstance(owners_before, list):
@@ -40,33 +40,53 @@ class Fulfillment(object):
             self.owners_before = owners_before
 
     def to_dict(self):
+        try:
+            # When we have signed the fulfillment, this will work
+            fulfillment = self.fulfillment.serialize_uri()
+        except TypeError:
+            fulfillment = None
+
         return {
             'owners_before': self.owners_before,
+            # TODO: Rename to `inputs` and `tx_inputs` and also make it an array
             'input': self.tx_input,
-            'fulfillment': self.fulfillment.serialize_uri(),
+            'fulfillment': fulfillment,
+            'details': self.fulfillment.to_dict(),
             'fid': self.fid,
         }
+
+    @classmethod
+    def gen_default(cls, owner_after):
+        """Creates a default fulfillment for a transaction of type `CREATE`.
+        """
+        return cls(Ed25519Fulfillment(public_key=owner_after), [owner_after], 0)
+
+    def gen_condition(self):
+        return Condition(self.fulfillment.condition_uri, self.owners_before, self.fid)
 
     @classmethod
     def from_dict(cls, ffill):
         """ Serializes a BigchainDB 'jsonized' fulfillment back to a BigchainDB Fulfillment class.
         """
-        return cls(ffill['fulfillment'], ffill['owners_before'], ffill['fid'], ffill['input'])
+        try:
+            fulfillment = CCFulfillment.from_uri(ffill['fulfillment'])
+        except TypeError:
+            fulfillment = CCFulfillment.from_dict(ffill['details'])
+        return cls(fulfillment, ffill['owners_before'], ffill['fid'], ffill['input'])
 
 
 class Condition(object):
     def __init__(self, condition_uri, owners_after=None, cid=0):
+        # TODO: Add more description
         """Create a new condition for a fulfillment
 
         Args
-            # TODO: Add more description
             owners_after (Optional(list)): base58 encoded public key of the owner of the digital asset after
             this transaction.
 
         """
         self.cid = cid
-        # TODO: should we be able to pass condition objects?
-        self.condition = CCCondition.from_uri(condition_uri)
+        self.condition_uri = condition_uri
 
         if not isinstance(owners_after, list):
             raise TypeError('`owners_after` must be a list instance')
@@ -76,24 +96,45 @@ class Condition(object):
     def to_dict(self):
         return {
             'owners_after': self.owners_after,
-            'condition': {
-                'details': self.condition.to_dict(),
-                'uri': self.condition.serialize_uri()
-            },
+            'condition': self.condition_uri,
             'cid': self.cid
         }
-
-    @classmethod
-    def gen_default_condition(cls, owner_after):
-        """Creates a default condition for a transaction of type `CREATE`.
-        """
-        return cls(Ed25519Fulfillment(public_key=owner_after).condition_uri, [owner_after], 0)
 
     @classmethod
     def from_dict(cls, cond):
         """ Serializes a BigchainDB 'jsonized' condition back to a BigchainDB Condition class.
         """
-        return cls(cond['condition']['uri'], cond['owners_after'], cond['cid'], )
+        # NOTE: Here we're actually passing a fulfillment, why?
+        return cls(cond['condition'], cond['owners_after'], cond['cid'])
+
+
+class Data(object):
+
+    def __init__(self, payload=None, payload_id=None):
+        self.payload_id = payload_id if payload_id is not None else self.to_hash()
+        if payload is not None and not isinstance(payload, dict):
+            raise TypeError('`payload` must be a dict instance or None')
+        else:
+            self.payload = payload
+
+    @classmethod
+    def from_dict(cls, payload):
+        try:
+            return cls(payload['payload'], payload['hash'])
+        except TypeError:
+            return cls()
+
+    def to_dict(self):
+        if self.payload is None:
+            return None
+        else:
+            return {
+                'payload': self.payload,
+                'hash': str(self.payload_id),
+            }
+
+    def to_hash(self):
+        return uuid4()
 
 
 class Transaction(object):
@@ -101,7 +142,7 @@ class Transaction(object):
     TRANSFER = 'TRANSFER'
     VERSION = 1
 
-    def __init__(self, owners_after, inputs=None, payload=None):
+    def __init__(self, operation, fulfillments=None, conditions=None, data=None, timestamp=None, version=None):
         # TODO: Update this comment
         """Create a new transaction in memory
 
@@ -125,10 +166,10 @@ class Transaction(object):
             fulfillments
             conditions
             operation
-            payload (Optional[dict]): dictionary with information about asset.
+           data (Optional[dict]): dictionary with information about asset.
 
         Raises:
-            TypeError: if the optional ``payload`` argument is not a ``dict``.
+            TypeError: if the optional ``data`` argument is not a ``dict``.
 
         # TODO: Incorporate this text somewhere better in the docs of this class
         Some use cases for this class:
@@ -143,37 +184,38 @@ class Transaction(object):
 
 
         """
-        self.fulfillments = []
-        self.conditions = []
-        if not isinstance(owners_after, list):
-            raise TypeError('`owners_after` must be a list instance')
-        else:
-            self.owners_after = owners_after
+        self.operation = operation
+        self.timestamp = timestamp if timestamp is not None else gen_timestamp()
+        self.version = version if version is not None else Transaction.VERSION
 
-        if inputs is not None and not isinstance(inputs, list):
-            raise TypeError('`inputs` must be a list instance or None')
-        elif inputs is None:
-            # If `inputs` is None, this tells us that the user of this class wants to create a
-            # transaction of type `CREATE`
-            self.operation = Transaction.CREATE
-            self._gen_default_condition()
+        if conditions is not None and not isinstance(conditions, list):
+            raise TypeError('`conditions` must be a list instance or None')
+        elif conditions is None:
+            self.conditions = []
         else:
-            self.operation = Transaction.TRANSFER
-            self.inputs = inputs
+            self.conditions = conditions
 
-        # Check if payload is either None or a dict. Otherwise throw
-        if payload is not None and not isinstance(payload, dict):
-            raise TypeError('`payload` must be an dict instance or None')
+        if fulfillments is not None and not isinstance(fulfillments, list):
+            raise TypeError('`fulfillments` must be a list instance or None')
+        elif fulfillments is None:
+            self.fulfillments = []
         else:
-            self.payload = payload
+            self.fulfillments = fulfillments
+
+        # TODO: rename this to data
+        if data is not None and not isinstance(data, Data):
+            raise TypeError('`data` must be a Data instance or None')
+        else:
+            self.data = data
 
     def sign(self, private_keys):
-        """ Signs a transaction by fulfilling the conditions given in the previous transactions.
-            Acts as a proxy for `_fulfill_conditions`, for exposing a nicer API to the outside.
+        """ Signs a transaction
+            Acts as a proxy for `_sign_fulfillments`, for exposing a nicer API to the outside.
         """
-        self._fulfill_conditions(private_keys)
+        self._sign_fulfillments(private_keys)
+        return self
 
-    def _fulfill_conditions(self, private_keys):
+    def _sign_fulfillments(self, private_keys):
         if private_keys is None:
             # TODO: Figure out the correct Python error
             raise Exception('`private_keys` cannot be None')
@@ -186,28 +228,22 @@ class Transaction(object):
         gen_public_key = lambda private_key: private_key.get_verifying_key().to_ascii().decode()
         key_pairs = {gen_public_key(SigningKey(private_key)): SigningKey(private_key) for private_key in private_keys}
 
-        for cid in enumerate(self.conditions):
-            # NOTE: This is kinda ugly, but the CC-API doesn't leave us with no other choice at this point
-            # NOTE: We could cast condition `to_dict`, but this saves us a serialization step
-            # TODO: Figure out which fulfillments and conditions need to be present for `to_dict`
-            tx_dict = self._to_dict()
-            condition_dict = tx_dict['transaction']['conditions'][cid]
-            fulfillment = CCFulfillment.from_dict(condition_dict['condition']['details'])
+        for fulfillment, condition in zip(self.fulfillments, self.conditions):
+            # NOTE: We clone the current transaction but only add the condition and fulfillment we're currently
+            # working on.
+            tx_partial = Transaction(self.operation, [fulfillment], [condition], self.data, self.timestamp,
+                                     self.version)
+            self._sign_fulfillment(fulfillment, str(tx_partial), key_pairs)
 
-            self._add_fulfillment(self._fulfill_condition(condition_dict, fulfillment, serialize(tx_dict), key_pairs))
+    def _sign_fulfillment(self, fulfillment, tx_serialized, key_pairs):
+        if isinstance(fulfillment.fulfillment, Ed25519Fulfillment):
+            self._fulfill_simple_signature_fulfillment(fulfillment, tx_serialized, key_pairs)
+        elif isinstance(fulfillment.fulfillment, ThresholdSha256Fulfillment):
+            # TODO: get owners_before from fulfillment
+            # TODO: Not sure if we need to update it to a new fulfillment
+            fulfillment = self._fulfill_threshold_signature_fulfillment(fulfillment, tx_serialized, key_pairs)
 
-    def _fulfill_condition(self, condition, fulfillment, tx_serialized, key_pairs):
-        owners_before = condition['owners_after']
-
-        if isinstance(fulfillment, Ed25519Fulfillment):
-            fulfillment = self._fulfill_simple_signature_condition(owners_before[0], fulfillment, tx_serialized,
-                                                                   key_pairs)
-        elif isinstance(fulfillment, ThresholdSha256Fulfillment):
-            fulfillment = self._fulfill_threshold_signature_condition(owners_before, fulfillment, tx_serialized,
-                                                                      key_pairs)
-        return Fulfillment(fulfillment, owners_before, condition['cid'], self.tx_input)
-
-    def _fulfill_simple_signature_condition(self, owner_before, fulfillment, tx_serialized, key_pairs):
+    def _fulfill_simple_signature_fulfillment(self, fulfillment, tx_serialized, key_pairs):
         # TODO: Update comment
         """Fulfill a cryptoconditions.Ed25519Fulfillment
 
@@ -221,12 +257,14 @@ class Transaction(object):
                 object: fulfilled cryptoconditions.Ed25519Fulfillment
 
         """
+        owner_before = fulfillment.owners_before[0]
         try:
-            fulfillment.sign(tx_serialized, key_pairs[owner_before])
+            # NOTE: By signing the CC fulfillment here directly, we're changing the transactions's fulfillment by
+            # reference, and that's good :)
+            fulfillment.fulfillment.sign(tx_serialized, key_pairs[owner_before])
         except KeyError:
             raise KeypairMismatchException('Public key {} is not a pair to any of the private keys'
                                            .format(owner_before))
-        return fulfillment
 
     def _fulfill_threshold_signature_fulfillment(self, owners_before, fulfillment, tx_serialized, key_pairs):
         # TODO: Update comment
@@ -262,33 +300,56 @@ class Transaction(object):
 
         return fulfillment
 
-    def _add_fulfillment(self, fulfillment):
-        self.fulfillments.append(fulfillment)
-
-    def _add_condition(self, condition):
-        self.conditions.append(condition)
-
     def to_dict(self):
-        return self._to_dict(self.fulfillments, self.conditions)
+        try:
+            data = self.data.to_dict()
+        except AttributeError:
+            # NOTE: data can be None and that's OK
+            data = None
 
-    def _to_dict(self, fulfillments=[], conditions=[]):
-        transaction = {
+        tx_body = {
             'fulfillments': [fulfillment.to_dict() for fulfillment in self.fulfillments],
             'conditions': [condition.to_dict() for condition in self.conditions],
             'operation': str(self.operation),
-            'timestamp': timestamp(),
-            'data': {
-                'uuid': str(uuid4()),
-                'payload': self.payload,
-            }
+            'timestamp': self.timestamp,
+            'data': data,
         }
-        return {
-            # TODO: Figure out if fulfillment signature is hashed here sometimes. This would be bad.
-            'id': get_hash_data(transaction),
-            'version': self.VERSION,
-            'transaction': transaction,
+        tx = {
+            'version': self.version,
+            'transaction': tx_body,
         }
 
+        tx_id = Transaction._to_hash(Transaction._to_str(Transaction._remove_signatures(tx)))
+        tx['id'] = tx_id
+
+        return tx
+
+    @staticmethod
+    def _remove_signatures(tx_dict):
+        # NOTE: Remove reference since we need `tx_dict` only for the transaction's hash
+        tx_dict = deepcopy(tx_dict)
+        for fulfillment in tx_dict['transaction']['fulfillments']:
+            fulfillment['details']['signature'] = None
+            fulfillment['fulfillment'] = None
+        return tx_dict
+
+    @staticmethod
+    def _to_hash(value):
+        return hash_data(value)
+
+    def to_hash(self):
+        return self.to_dict()['id']
+
+    @staticmethod
+    def _to_str(value):
+        return serialize(value)
+
+    def __str__(self):
+        return Transaction._to_str(self.to_dict())
+
     @classmethod
-    def from_dict(cls, tx):
-        pass
+    def from_dict(cls, tx_body):
+        tx = tx_body['transaction']
+        return cls(tx['operation'], [Fulfillment.from_dict(fulfillment) for fulfillment in tx['fulfillments']],
+                   [Condition.from_dict(condition) for condition in tx['conditions']], Data.from_dict(tx['data']),
+                   tx['timestamp'], tx_body['version'])
