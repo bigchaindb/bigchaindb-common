@@ -104,7 +104,6 @@ class Condition(object):
     def from_dict(cls, cond):
         """ Serializes a BigchainDB 'jsonized' condition back to a BigchainDB Condition class.
         """
-        # NOTE: Here we're actually passing a fulfillment, why?
         return cls(cond['condition'], cond['owners_after'], cond['cid'])
 
 
