@@ -1,11 +1,14 @@
-from uuid import uuid4
 from copy import deepcopy
+from functools import reduce
+from operator import and_
+from uuid import uuid4
 
 from cryptoconditions import (
     Fulfillment as CCFulfillment,
     ThresholdSha256Fulfillment,
     Ed25519Fulfillment,
 )
+from cryptoconditions.exceptions import ParsingError
 
 from bigchaindb.crypto import (
     SigningKey,
@@ -183,9 +186,13 @@ class Transaction(object):
 
 
         """
-        self.operation = operation
         self.timestamp = timestamp if timestamp is not None else gen_timestamp()
         self.version = version if version is not None else Transaction.VERSION
+
+        if operation is not Transaction.CREATE and operation is not Transaction.TRANSFER:
+            raise TypeError('`operation` must be either CREATE or TRANSFER')
+        else:
+            self.operation = operation
 
         if conditions is not None and not isinstance(conditions, list):
             raise TypeError('`conditions` must be a list instance or None')
@@ -227,6 +234,7 @@ class Transaction(object):
         gen_public_key = lambda private_key: private_key.get_verifying_key().to_ascii().decode()
         key_pairs = {gen_public_key(SigningKey(private_key)): SigningKey(private_key) for private_key in private_keys}
 
+        # TODO: The condition for a transfer-tx will come from an input
         for fulfillment, condition in zip(self.fulfillments, self.conditions):
             # NOTE: We clone the current transaction but only add the condition and fulfillment we're currently
             # working on.
@@ -298,6 +306,42 @@ class Transaction(object):
             fulfillment.add_subfulfillment(subfulfillment)
 
         return fulfillment
+
+    def fulfillments_valid(self):
+        # TODO: Update Comment
+        """Verify the signature of a transaction
+
+        A valid transaction should have been signed `current_owner` corresponding private key.
+
+        Args:
+            signed_transaction (dict): a transaction with the `signature` included.
+
+        Returns:
+            bool: True if the signature is correct, False otherwise.
+        """
+        zipped_io = list(zip(self.fulfillments, self.conditions))
+
+        if len(zipped_io) > 1:
+            # TODO: The condition for a transfer-tx will come from an input
+            gen_tx = lambda ffill, cond: Transaction(self.operation, [ffill], [cond], self.data, self.timestamp,
+                                                     self.version).fulfillments_valid()
+            return reduce(and_, map(gen_tx, zipped_io))
+        else:
+            return self._fulfillment_valid()
+
+    def _fulfillment_valid(self):
+        fulfillment = self.fulfillments[0].fulfillment
+
+        try:
+            parsed_fulfillment = CCFulfillment.from_uri(fulfillment.serialize_uri())
+        # TODO: Figure out if we need all three of those errors here
+        except (TypeError, ValueError, ParsingError):
+            return False
+
+        # TODO: For transfer-transaction, we'll also have to validate against the given condition
+        # TODO: Make this more pretty
+        return parsed_fulfillment.validate(message=Transaction._to_str(Transaction._remove_signatures(self.to_dict())),
+                                           now=gen_timestamp())
 
     def to_dict(self):
         try:
