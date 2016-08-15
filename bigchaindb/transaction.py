@@ -10,6 +10,7 @@ from cryptoconditions import (
 )
 from cryptoconditions.exceptions import ParsingError
 
+# TODO: Eventually remove all coupling from the core BigchainDB code base, as this module will life separately.
 from bigchaindb.crypto import (
     SigningKey,
     hash_data,
@@ -51,7 +52,6 @@ class Fulfillment(object):
 
         return {
             'owners_before': self.owners_before,
-            # TODO: Rename to `inputs` and `tx_inputs` and also make it an array
             'input': self.tx_input,
             'fulfillment': fulfillment,
             'details': self.fulfillment.to_dict(),
@@ -59,10 +59,24 @@ class Fulfillment(object):
         }
 
     @classmethod
-    def gen_default(cls, owner_after):
-        """Creates a default fulfillment for a transaction of type `CREATE`.
+    def gen_default(cls, owners_after, fid=0):
+        """Creates default fulfillments for transactions, depending on how many `owners_after` are supplied.
         """
-        return cls(Ed25519Fulfillment(public_key=owner_after), [owner_after], 0)
+        if not isinstance(owners_after, list):
+            raise TypeError('`owners_after` must be a list instance')
+        else:
+            owners_after_count = len(owners_after)
+
+            if owners_after_count == 0:
+                # TODO: Replace this error with the logic for a hashlock condition
+                raise NotImplementedError('Hashlock conditions are not implemented in BigchainDB yet')
+            elif owners_after_count == 1:
+                return cls(Ed25519Fulfillment(public_key=owners_after[0]), owners_after, fid)
+            else:
+                threshold_ffill = cls(ThresholdSha256Fulfillment(threshold=len(owners_after)), owners_after, fid)
+                for owner_after in owners_after:
+                    threshold_ffill.fulfillment.add_subfulfillment(Ed25519Fulfillment(public_key=owner_after))
+                return threshold_ffill
 
     def gen_condition(self):
         return Condition(self.fulfillment.condition_uri, self.owners_before, self.fid)
@@ -111,7 +125,6 @@ class Condition(object):
 
 
 class Data(object):
-
     def __init__(self, payload=None, payload_id=None):
         self.payload_id = payload_id if payload_id is not None else self.to_hash()
         if payload is not None and not isinstance(payload, dict):
@@ -214,6 +227,8 @@ class Transaction(object):
         else:
             self.data = data
 
+    # TODO: This shouldn't be in the base of the Transaction class, but rather only for the client implementation,
+    #       since for example the Transaction class in BigchainDB doesn't have to sign transactions.
     def sign(self, private_keys):
         """ Signs a transaction
             Acts as a proxy for `_sign_fulfillments`, for exposing a nicer API to the outside.
@@ -221,6 +236,8 @@ class Transaction(object):
         self._sign_fulfillments(private_keys)
         return self
 
+    # TODO: This shouldn't be in the base of the Transaction class, but rather only for the client implementation,
+    #       since for example the Transaction class in BigchainDB doesn't have to sign transactions.
     def _sign_fulfillments(self, private_keys):
         if private_keys is None:
             # TODO: Figure out the correct Python error
@@ -242,14 +259,16 @@ class Transaction(object):
                                      self.version)
             self._sign_fulfillment(fulfillment, str(tx_partial), key_pairs)
 
+    # TODO: This shouldn't be in the base of the Transaction class, but rather only for the client implementation,
+    #       since for example the Transaction class in BigchainDB doesn't have to sign transactions.
     def _sign_fulfillment(self, fulfillment, tx_serialized, key_pairs):
         if isinstance(fulfillment.fulfillment, Ed25519Fulfillment):
             self._fulfill_simple_signature_fulfillment(fulfillment, tx_serialized, key_pairs)
         elif isinstance(fulfillment.fulfillment, ThresholdSha256Fulfillment):
-            # TODO: get owners_before from fulfillment
-            # TODO: Not sure if we need to update it to a new fulfillment
-            fulfillment = self._fulfill_threshold_signature_fulfillment(fulfillment, tx_serialized, key_pairs)
+            self._fulfill_threshold_signature_fulfillment(fulfillment, tx_serialized, key_pairs)
 
+    # TODO: This shouldn't be in the base of the Transaction class, but rather only for the client implementation,
+    #       since for example the Transaction class in BigchainDB doesn't have to sign transactions.
     def _fulfill_simple_signature_fulfillment(self, fulfillment, tx_serialized, key_pairs):
         # TODO: Update comment
         """Fulfill a cryptoconditions.Ed25519Fulfillment
@@ -273,7 +292,9 @@ class Transaction(object):
             raise KeypairMismatchException('Public key {} is not a pair to any of the private keys'
                                            .format(owner_before))
 
-    def _fulfill_threshold_signature_fulfillment(self, owners_before, fulfillment, tx_serialized, key_pairs):
+    # TODO: This shouldn't be in the base of the Transaction class, but rather only for the client implementation,
+    #       since for example the Transaction class in BigchainDB doesn't have to sign transactions.
+    def _fulfill_threshold_signature_fulfillment(self, fulfillment, tx_serialized, key_pairs):
         # TODO: Update comment
         """Fulfill a cryptoconditions.ThresholdSha256Fulfillment
 
@@ -286,13 +307,14 @@ class Transaction(object):
             Returns:
                 object: fulfilled cryptoconditions.ThresholdSha256Fulfillment
 
-            """
-        fulfillment_copy = deepcopy(fulfillment)
-        fulfillment.subconditions = []
-
-        for owner_before in owners_before:
+        """
+        for owner_before in fulfillment.owners_before:
             try:
-                subfulfillment = fulfillment_copy.get_subcondition_from_vk(owner_before)[0]
+                # TODO: CC should throw a KeypairMismatchException, instead of our manual mapping here
+                # TODO FOR CC: Naming wise this is not so smart, `get_subcondition` in fact doesn't return a condition
+                #              but a fulfillment:(
+                # TODO FOR CC: `get_subcondition` is singular. One would not expect to get a list back.
+                subfulfillment = fulfillment.fulfillment.get_subcondition_from_vk(owner_before)[0]
             except IndexError:
                 raise KeypairMismatchException('Public key {} cannot be found in the fulfillment'
                                                .format(owner_before))
@@ -303,9 +325,6 @@ class Transaction(object):
                                                .format(owner_before))
 
             subfulfillment.sign(tx_serialized, private_key)
-            fulfillment.add_subfulfillment(subfulfillment)
-
-        return fulfillment
 
     def fulfillments_valid(self):
         # TODO: Update Comment
@@ -339,9 +358,7 @@ class Transaction(object):
             return False
 
         # TODO: For transfer-transaction, we'll also have to validate against the given condition
-        # TODO: Make this more pretty
-        return parsed_fulfillment.validate(message=Transaction._to_str(Transaction._remove_signatures(self.to_dict())),
-                                           now=gen_timestamp())
+        return parsed_fulfillment.validate(message=Transaction._to_str(Transaction._remove_signatures(self.to_dict())))
 
     def to_dict(self):
         try:
@@ -372,8 +389,17 @@ class Transaction(object):
         # NOTE: Remove reference since we need `tx_dict` only for the transaction's hash
         tx_dict = deepcopy(tx_dict)
         for fulfillment in tx_dict['transaction']['fulfillments']:
-            fulfillment['details']['signature'] = None
+            # NOTE: Not all Cryptoconditions return a `signature` key (e.g. ThresholdSha256Fulfillment), so setting it
+            #       to `None` in any case could yield incorrect signatures. This is why we only set it to `None` if
+            #       it's set in the dict.
+            if 'signature' in fulfillment['details']:
+                fulfillment['details']['signature'] = None
             fulfillment['fulfillment'] = None
+            try:
+                for subfulfillment in fulfillment['details']['subfulfillments']:
+                    subfulfillment['signature'] = None
+            except KeyError:
+                pass
         return tx_dict
 
     @staticmethod
