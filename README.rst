@@ -8,6 +8,9 @@ bigchaindb-common
 .. image:: https://img.shields.io/travis/bigchaindb/bigchaindb-common.svg
         :target: https://travis-ci.org/bigchaindb/bigchaindb-common
 
+.. image:: https://img.shields.io/codecov/c/github/bigchaindb/bigchaindb-common/master.svg
+    :target: https://codecov.io/github/bigchaindb/bigchaindb-common?branch=master
+
 .. image:: https://readthedocs.org/projects/bigchaindb-common/badge/?version=latest
         :target: https://bigchaindb-common.readthedocs.io/en/latest/?badge=latest
         :alt: Documentation Status
