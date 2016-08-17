@@ -35,8 +35,13 @@ class Fulfillment(object):
             transaction.
         """
         self.fid = fid
+        # TODO: Check if `fulfillment` corresponds to `owners_before`, otherwise fail
         self.fulfillment = fulfillment
-        self.tx_input = tx_input
+
+        if tx_input is not None and not isinstance(tx_input, TransactionLink):
+            raise TypeError('`tx_input` must be a TransactionLink instance')
+        else:
+            self.tx_input = tx_input
 
         if not isinstance(owners_before, list):
             raise TypeError('`owners_before` must be a list instance')
@@ -50,9 +55,15 @@ class Fulfillment(object):
         except TypeError:
             fulfillment = None
 
+        try:
+            # NOTE: `self.tx_input` can be `None` and that's fine
+            tx_input = self.tx_input.to_dict()
+        except AttributeError:
+            tx_input = None
+
         return {
             'owners_before': self.owners_before,
-            'input': self.tx_input,
+            'input': tx_input,
             'fulfillment': fulfillment,
             'details': self.fulfillment.to_dict(),
             'fid': self.fid,
@@ -89,7 +100,7 @@ class Fulfillment(object):
             fulfillment = CCFulfillment.from_uri(ffill['fulfillment'])
         except TypeError:
             fulfillment = CCFulfillment.from_dict(ffill['details'])
-        return cls(fulfillment, ffill['owners_before'], ffill['fid'], ffill['input'])
+        return cls(fulfillment, ffill['owners_before'], ffill['fid'], TransactionLink.from_dict(ffill['input']))
 
 
 class Condition(object):
@@ -103,6 +114,7 @@ class Condition(object):
 
         """
         self.cid = cid
+        # TODO: Check if `condition_uri` corresponds to `owners_after`, otherwise fail
         self.condition_uri = condition_uri
 
         if not isinstance(owners_after, list):
@@ -150,6 +162,29 @@ class Data(object):
 
     def to_hash(self):
         return uuid4()
+
+
+class TransactionLink(object):
+    # NOTE: In an IPLD implementation, this class is not necessary anymore, as an IPLD link can simply point to an
+    #       object, as well as an objects properties. So instead of having a (de)serializable class, we can have a
+    #       simple IPLD link of the form (not clear yet how to address indexes in arrays:
+    #        - https://github.com/ipld/specs/issues/20
+    def __init__(self, tx_id=None, cid=None):
+        self.tx_id = tx_id
+        self.cid = cid
+
+    @classmethod
+    def from_dict(cls, link):
+        return cls(link['tx_id'], link['cid'])
+
+    def to_dict(self):
+        if self.tx_id is None and self.cid is None:
+            return None
+        else:
+            return {
+                'tx_id': self.tx_id,
+                'cid': self.cid,
+            }
 
 
 class Transaction(object):
@@ -349,6 +384,8 @@ class Transaction(object):
             return self._fulfillment_valid()
 
     def _fulfillment_valid(self):
+        # NOTE: We're always taking the first fulfillment, as this method is called recursively.
+        #       See: `fulfillments_valid`
         fulfillment = self.fulfillments[0].fulfillment
 
         try:
@@ -358,7 +395,19 @@ class Transaction(object):
             return False
 
         # TODO: For transfer-transaction, we'll also have to validate against the given condition
-        return parsed_fulfillment.validate(message=Transaction._to_str(Transaction._remove_signatures(self.to_dict())))
+        # NOTE: We pass a timestamp here, as in case of a timeout condition we'll have to validate against it.
+        return parsed_fulfillment.validate(message=Transaction._to_str(Transaction._remove_signatures(self.to_dict())),
+                                           now=gen_timestamp())
+
+    def transfer(self, conditions):
+        return Transaction(Transaction.TRANSFER, self._fulfillments_as_inputs(), conditions)
+
+    def _fulfillments_as_inputs(self):
+        return [Fulfillment(ffill.fulfillment,
+                            ffill.owners_before,
+                            ffill.fid,
+                            TransactionLink(self.to_hash(), ffill.fid))
+                for ffill in self.fulfillments]
 
     def to_dict(self):
         try:
