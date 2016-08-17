@@ -11,6 +11,8 @@ with open('HISTORY.rst') as history_file:
 
 install_requires = [
     'cryptoconditions==0.4.1',
+    'python-rapidjson==0.0.6',
+    'pysha3==0.3',
 ]
 
 tests_require = [
