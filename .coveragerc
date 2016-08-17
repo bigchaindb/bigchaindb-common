@@ -1,0 +1,3 @@
+[run]
+source = bigchaindb_common
+omit = *test*, docs/*, setup.py

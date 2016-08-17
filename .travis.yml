@@ -1,0 +1,12 @@
+language: python
+python: 3.5
+
+env:
+  - TOXENV=py35
+  - TOXENV=flake8
+
+install: pip install -U tox codecov
+
+script: tox -e ${TOXENV}
+
+after_success: codecov

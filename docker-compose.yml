@@ -1,0 +1,26 @@
+version: '2'
+
+services:
+  bigchaindb-common:
+    build:
+      context: .
+    volumes:
+      - ./docs:/usr/src/app/docs
+      - ./tests:/usr/src/app/tests
+      - ./bigchaindb_common:/usr/src/app/bigchaindb_common
+      - ./setup.py:/usr/src/app/setup.py
+      - ./.coveragerc:/usr/src/app/.coveragerc
+  rethinkdb-server:
+    image: rethinkdb
+    ports:
+      - "58585:8080"
+      - "28015"
+  bigchaindb-server:
+    build:
+      context: ./compose/bigchaindb-server/
+    volumes:
+      - ./.bigchaindb:/root/.bigchaindb
+    environment:
+      BIGCHAINDB_DATABASE_HOST: rethinkdb-server
+      BIGCHAINDB_CONFIG_PATH: /root/.bigchaindb
+    command: bigchaindb start
