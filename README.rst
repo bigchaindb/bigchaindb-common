@@ -23,7 +23,7 @@ bigchaindb-common
 Set of reusable components for BigchainDB Python software.
 
 
-* Free software: GNU General Public License v3
+* Free software: Apache Software License 2.0
 * Documentation: https://bigchaindb-common.readthedocs.io.
 
 
