@@ -23,7 +23,8 @@ bigchaindb-common
 Set of reusable components for BigchainDB Python software.
 
 * Development Status: Planning
-* Free software: Apache Software License 2.0
+* The software is released under the terms of the GNU Affero General Public
+  License, version 3.
 * Documentation: https://bigchaindb-common.readthedocs.io.
 
 
