@@ -38,7 +38,7 @@ docs_require = [
 
 setup(
     name='bigchaindb_common',
-    version='0.0.1a4',
+    version='0.0.2.dev1',
     description="Set of reusable components for BigchainDB Python software.",
     long_description=readme + '\n\n' + history,
     author="BigchainDB",
