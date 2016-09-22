@@ -547,7 +547,7 @@ def test_validate_fulfillment_with_invalid_parameters(utx):
     tx_serialized = Transaction._to_str(Transaction._remove_signatures(utx.to_dict()))
     assert utx._fulfillment_valid(utx.fulfillments[0],
                                   tx_serialized,
-                                  input_conditions) == False
+                                  input_conditions) is False
 
 
 def test_validate_multiple_fulfillments(user_ffill, user_cond, user_priv):
@@ -851,7 +851,7 @@ def test_create_create_transaction_with_invalid_parameters():
     from bigchaindb_common.transaction import Transaction
 
     with raises(TypeError):
-        Transaction.create('not a list')
+        Transaction.create('not a list', [])
     with raises(TypeError):
         Transaction.create([], 'not a list')
     with raises(NotImplementedError):
@@ -862,6 +862,17 @@ def test_create_create_transaction_with_invalid_parameters():
         Transaction.create(['a'], [], secret=None)
     with raises(ValueError):
         Transaction.create([], [], secret='wow, much secret')
+
+
+def test_create_create_transaction_with_threshold_tuple(user_pub, user2_pub,
+                                                        user3_pub):
+    from bigchaindb_common.transaction import Transaction
+
+    custom_threshold = ([user2_pub, user3_pub], 1)
+    tx = Transaction.create([user_pub], custom_threshold)
+
+    assert tx.conditions[0].fulfillment.threshold == 1
+    assert len(tx.conditions[0].fulfillment.subconditions) == 2
 
 
 def test_conditions_to_inputs(tx):
