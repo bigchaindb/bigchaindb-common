@@ -309,8 +309,13 @@ class Transaction(object):
                time_expire=None):
         if not isinstance(owners_before, list):
             raise TypeError('`owners_before` must be a list instance')
-        if not isinstance(owners_after, list):
+        if not isinstance(owners_after, (list, tuple)):
             raise TypeError('`owners_after` must be a list instance')
+        elif isinstance(owners_after, tuple):
+            threshold = owners_after[1]
+            owners_after = owners_after[0]
+        else:
+            threshold = len(owners_after)
 
         data = Data(payload)
         if len(owners_before) == len(owners_after) and len(owners_after) == 1:
@@ -323,17 +328,16 @@ class Transaction(object):
             return cls(cls.CREATE, [ffill_tx], [cond_tx], data)
 
         elif len(owners_before) == len(owners_after) and len(owners_after) > 1:
-            raise NotImplementedError('Multiple inputs and outputs not'
+            raise NotImplementedError('Multiple inputs and outputs not '
                                       'available for CREATE')
-            # NOTE: Multiple inputs and outputs case. Currently not supported.
-            ffills = [Fulfillment(Ed25519Fulfillment(public_key=owner_before),
-                                  [owner_before])
-                      for owner_before in owners_before]
-            conds = [Condition.generate(owners) for owners in owners_after]
-            return cls(cls.CREATE, ffills, conds, data)
 
         elif len(owners_before) == 1 and len(owners_after) > 1:
-            # NOTE: Multiple owners case
+            # NOTE: Multiple owners case (Threshold condition)
+            # NOTE: We're reconstructing `owners_after` to its original form
+            #       again, as for `CREATE` there is no notion of multiple
+            #       inputs and outputs, so having the additional level in
+            #       `Transaction.create`'s signature wouldn't make sense.
+            owners_after = (owners_after, threshold)
             cond_tx = Condition.generate(owners_after)
             ffill = Ed25519Fulfillment(public_key=owners_before[0])
             ffill_tx = Fulfillment(ffill, owners_before)
@@ -348,7 +352,8 @@ class Transaction(object):
             return cls(cls.CREATE, [ffill_tx], [cond_tx], data)
 
         elif len(owners_before) > 0 and len(owners_after) == 0 and time_expire is not None:
-            raise NotImplementedError('Timeout conditions will be implemented later')
+            raise NotImplementedError('Timeout conditions will be implemented '
+                                      'later')
 
         elif len(owners_before) > 0 and len(owners_after) == 0 and secret is None:
             raise ValueError('Define a secret to create a hashlock condition')
