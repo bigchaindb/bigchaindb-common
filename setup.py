@@ -54,7 +54,7 @@ setup(
     zip_safe=False,
     keywords='bigchaindb_common',
     classifiers=[
-        'Development Status :: 1 - Planning',
+        'Development Status :: 2 - Pre-Alpha',
         'Intended Audience :: Developers',
         'License :: OSI Approved :: Apache Software License',
         'Natural Language :: English',
