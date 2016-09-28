@@ -30,7 +30,10 @@ Set of reusable components for BigchainDB Python software.
 Features
 --------
 
-* TODO
+- Fully (de)serializable Transaction model of BigchainDB
+- Support for the creation and signing of advanced Cryptoconditions
+- Easily overridable methods for easy adaptability of new concepts
+
 
 Credits
 -------
