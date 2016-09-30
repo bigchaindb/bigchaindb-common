@@ -11,8 +11,9 @@ bigchaindb-common
     *Implementation not yet released.*
 
 .. toctree::
-   :maxdepth: 2
-
+   :maxdepth: 1
+   
+   ← Back to All BigchainDB Docs <https://bigchaindb.readthedocs.io/en/latest/index.html>
    readme
    installation
    usage
