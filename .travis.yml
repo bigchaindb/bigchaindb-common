@@ -1,12 +1,17 @@
 language: python
 python: 3.5
-
 env:
-  - TOXENV=py35
-  - TOXENV=flake8
-
+- TOXENV=py35
+- TOXENV=flake8
 install: pip install -U tox codecov
-
 script: tox -e ${TOXENV}
-
 after_success: codecov
+deploy:
+  provider: pypi
+  user: TimDaub
+  password:
+    secure: OZnRcSSPAvJrTf3/OkARVaJcOFqhRcpvHlZsSJ5PvJmv9tas1PCbSlus3C8sXLjk/FKYLoxsu2qXtlWSMhtNAww57uRb8G+KChHgy2QkfHiIOAuvoWXTBn7mX+YYbkQaEzQlGeDTvyTo7UwgAFug3w4b/zHLmVLJZlv8c7noNdS2QYXmeldQXdtoK4oLsEiI+Mnn/x04W5CP9lb56bJv8ZhLTIvViK8pgnZy9E0CZQWTKwnluk4eNAOF14GTt3laWejYvRw6DEJbpaNGYyFNHovlSvOS4LMhc/AEZ4W91MULC2caZBSDohSv8kPdSQIHb330BuOpEDUbrJIcBJ+i1nCPJysvZ6Yz6seJFn4V6moFmV1/kEY8/Ra2xRIM8ga2EyFNfDM6tpcJHn4yMZnyqdzc4H1JoEV7yWpgPEfGgl7R0Y1uBVs5JSlPaD5ejaBD66lUUdirPYJhC45U8+FdY2k5q5GAPxv7C3hrBNmhy8mj1LdstltcFLJwLOwAl4PT7if1K4vMvywtZp0cgTSc3Js/+pq+kHJeLNEqarqBKMr251gmoAesRIe1/SA6RHzVzegQ5KGFzFAG71h+8ufF/tJzFfuwlepnlzqqn+vF0tfoX2NvOWIK7lywy+nYghLYApwcYiXp/qbqzIAxMKiVJBCsb8ehg/BHBmjSjg3cRpY=
+  on:
+    tags: true
+    distributions: sdist bdist_wheel
+    repo: bigchaindb/bigchaindb-common
