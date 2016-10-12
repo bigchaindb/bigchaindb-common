@@ -193,8 +193,29 @@ class TransactionLink(object):
 
 
 class Condition(object):
+    """A Condition is used to lock an asset.
+
+        Attributes:
+            fulfillment (:class:`cryptoconditions.Fulfillment`): A Fulfillment
+                to extract a Condition from.
+            owners_after (:obj:`list` of :obj:`str`, optional): A list of
+                owners before a Transaction was confirmed.
+    """
+
     def __init__(self, fulfillment, owners_after=None, amount=1):
-        # TODO: Add more description
+        """Condition shims a Cryptocondition condition for BigchainDB.
+
+            Args:
+                fulfillment (:class:`cryptoconditions.Fulfillment`): A
+                    Fulfillment to extract a Condition from.
+                owners_after (:obj:`list` of :obj:`str`, optional): A list of
+                    owners before a Transaction was confirmed.
+                amount (int): The amount of Assets to be locked with this
+                    Condition.
+
+            Raises:
+                TypeError: if `owners_after` is not instance of `list`.
+        """
         self.fulfillment = fulfillment
         # TODO: Not sure if we should validate for value here
         self.amount = amount
@@ -205,9 +226,25 @@ class Condition(object):
             self.owners_after = owners_after
 
     def __eq__(self, other):
+        # TODO: If `other !== Condition` return `False`
         return self.to_dict() == other.to_dict()
 
     def to_dict(self, cid=None):
+        """Transforms the object to a Python dictionary.
+
+            Note:
+                A `cid` can be submitted to be included in the dictionary
+                representation.
+
+                A dictionary serialization of the Fulfillment the Condition was
+                derived from is always provided.
+
+            Args:
+                cid (int, optional): The Condition's index in a Transaction.
+
+            Returns:
+                dict: The Condition as an alternative serialization format.
+        """
         # TODO FOR CC: It must be able to recognize a hashlock condition
         #              and fulfillment!
         condition = {}
@@ -232,30 +269,38 @@ class Condition(object):
 
     @classmethod
     def generate(cls, owners_after):
-        """Generates conditions from a specifically formed tuple or list.
+        """Generates a Condition from a specifically formed tuple or list.
 
-            If a ThresholdCondition has to be generated where the threshold is
-            always the number of subconditions it is split between, a list of
-            the following structure is sufficient:
+            Note:
+                If a ThresholdCondition has to be generated where the threshold
+                is always the number of subconditions it is split between, a
+                list of the following structure is sufficient:
 
-            [(address|condition)*, [(address|condition)*, ...], ...]
+                [(address|condition)*, [(address|condition)*, ...], ...]
 
-            If however, the thresholds of individual threshold conditions to be
-            created have to be set specifically, a tuple of the following
-            structure is necessary:
+                If however, the thresholds of individual threshold conditions
+                to be created have to be set specifically, a tuple of the
+                following structure is necessary:
 
-            ([(address|condition)*,
-              ([(address|condition)*, ...], subthreshold),
-              ...], threshold)
+                ([(address|condition)*,
+                  ([(address|condition)*, ...], subthreshold),
+                  ...], threshold)
 
             Args:
-                owners_after (list|tuple): The users that should be able to
-                                           fulfill the condition that is being
-                                           created.
-            Returns:
-                A `Condition` that can be used in a `Transaction`.
+                owners_after (:obj:`list` of :obj:`str`|tuple): The users that
+                    should be able to fulfill the Condition that is being
+                    created.
 
+            Returns:
+                A Condition that can be used in a Transaction.
+
+            Returns:
+                TypeError: If `owners_after` is not an instance of `list`.
+                TypeError: If `owners_after` is an empty list.
         """
+        # TODO: We probably want to remove the tuple logic for weights here
+        #       again: https://github.com/bigchaindb/bigchaindb-common/issues/
+        #       12#issuecomment-251665325
         if isinstance(owners_after, tuple):
             owners_after, threshold = owners_after
         else:
@@ -280,6 +325,22 @@ class Condition(object):
 
     @classmethod
     def _gen_condition(cls, initial, current):
+        """Generates ThresholdSha256 conditions from a list of new owners.
+
+            Note:
+                This method is intended only to be used with a reduce function.
+                For a description on how to use this method, see
+                `Condition.generate`.
+
+            Args:
+                initial (:class:`cryptoconditions.ThresholdSha256Fulfillment`):
+                    A Condition representing the overall root.
+                current (:obj:`list` of :obj:`str`|str): A list of new owners
+                    or a single new owner.
+
+            Returns:
+                :class:`cryptoconditions.ThresholdSha256Fulfillment`:
+        """
         if isinstance(current, tuple):
             owners_after, threshold = current
         else:
@@ -314,6 +375,20 @@ class Condition(object):
 
     @classmethod
     def from_dict(cls, cond):
+        """Transforms a Python dictionary to a Condition object.
+
+            Note:
+                To pass a serialization cycle multiple times, a
+                Cryptoconditions Fulfillment needs to be present in the
+                passed-in dictionary, as Condition URIs are not serializable
+                anymore.
+
+            Args:
+                cond (dict): The Condition to be transformed.
+
+            Returns:
+                :class:`~bigchaindb_common.transaction.Condition`
+        """
         try:
             fulfillment = CCFulfillment.from_dict(cond['condition']['details'])
         except KeyError:
