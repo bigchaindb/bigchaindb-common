@@ -14,7 +14,30 @@ from bigchaindb_common.util import serialize, gen_timestamp
 
 
 class Fulfillment(object):
+    """A Fulfillment is used to spend assets locked by a Condition.
+
+        Attributes:
+            fulfillment (:class:`cryptoconditions.Fulfillment`): A Fulfillment
+                to be signed with a private key.
+            owners_before (:obj:`list` of :obj:`str`): A list of owners after a
+                Transaction was confirmed.
+            tx_input (:class:`~bigchaindb_common.transaction. TransactionLink`,
+                optional): A link representing the input of a `TRANSFER`
+                Transaction.
+    """
+
     def __init__(self, fulfillment, owners_before, tx_input=None):
+        """Fulfillment shims a Cryptocondition Fulfillment for BigchainDB.
+
+            Args:
+                fulfillment (:class:`cryptoconditions.Fulfillment`): A
+                    Fulfillment to be signed with a private key.
+                owners_before (:obj:`list` of :obj:`str`): A list of owners
+                    after a Transaction was confirmed.
+                tx_input (:class:`~bigchaindb_common.transaction.
+                    TransactionLink`, optional): A link representing the input
+                    of a `TRANSFER` Transaction.
+        """
         self.fulfillment = fulfillment
 
         if tx_input is not None and not isinstance(tx_input, TransactionLink):
@@ -28,9 +51,25 @@ class Fulfillment(object):
             self.owners_before = owners_before
 
     def __eq__(self, other):
+        # TODO: If `other !== Fulfillment` return `False`
         return self.to_dict() == other.to_dict()
 
     def to_dict(self, fid=None):
+        """Transforms the object to a Python dictionary.
+
+            Note:
+                A `fid` can be submitted to be included in the dictionary
+                representation.
+
+                If a Fulfillment hasn't been signed yet, this method returns a
+                dictionary representation.
+
+            Args:
+                fid (int, optional): The Fulfillment's index in a Transaction.
+
+            Returns:
+                dict: The Fulfillment as an alternative serialization format.
+        """
         try:
             fulfillment = self.fulfillment.serialize_uri()
         except (TypeError, AttributeError):
@@ -61,7 +100,20 @@ class Fulfillment(object):
 
     @classmethod
     def from_dict(cls, ffill):
-        """Serializes a dictionary to a Fulfillment object.
+        """Transforms a Python dictionary to a Fulfillment object.
+
+            Note:
+                Optionally, this method can also serialize a Cryptoconditions-
+                Fulfillment that is not yet signed.
+
+            Args:
+                ffill (dict): The Fulfillment to be transformed.
+
+            Returns:
+                :class:`~bigchaindb_common.transaction.Fulfillment`
+
+            Raises:
+                InvalidSignature: If a Fulfillment's URI couldn't be parsed.
         """
         try:
             fulfillment = CCFulfillment.from_uri(ffill['fulfillment'])
