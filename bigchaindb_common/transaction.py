@@ -129,11 +129,29 @@ class Fulfillment(object):
 
 
 class TransactionLink(object):
-    # NOTE: In an IPLD implementation, this class is not necessary anymore,
-    # as an IPLD link can simply point to an object, as well as an objects
-    # properties. So instead of having a (de)serializable class, we can have a
-    # simple IPLD link of the form: `/<tx_id>/transaction/conditions/<cid>/`
+    """An object for unidirectional linking to a Transaction's Condition.
+
+        Attributes:
+            txid (str, optional): A Transaction to link to.
+            cid (int, optional): A Condition's index in a Transaction with id
+            `txid`.
+    """
+
     def __init__(self, txid=None, cid=None):
+        """Used to point to a specific Condition of a Transaction.
+
+            Note:
+                In an IPLD implementation, this class is not necessary anymore,
+                as an IPLD link can simply point to an object, as well as an
+                objects properties. So instead of having a (de)serializable
+                class, we can have a simple IPLD link of the form:
+                `/<tx_id>/transaction/conditions/<cid>/`.
+
+            Args:
+                txid (str, optional): A Transaction to link to.
+                cid (int, optional): A Condition's index in a Transaction with
+                    id `txid`.
+        """
         self.txid = txid
         self.cid = cid
 
@@ -141,16 +159,30 @@ class TransactionLink(object):
         return self.txid is not None and self.cid is not None
 
     def __eq__(self, other):
+        # TODO: If `other !== TransactionLink` return `False`
         return self.to_dict() == self.to_dict()
 
     @classmethod
     def from_dict(cls, link):
+        """Transforms a Python dictionary to a TransactionLink object.
+
+            Args:
+                link (dict): The link to be transformed.
+
+            Returns:
+                :class:`~bigchaindb_common.transaction.TransactionLink`
+        """
         try:
             return cls(link['txid'], link['cid'])
         except TypeError:
             return cls()
 
     def to_dict(self):
+        """Transforms the object to a Python dictionary.
+
+            Returns:
+                (dict|None): The link as an alternative serialization format.
+        """
         if self.txid is None and self.cid is None:
             return None
         else:
