@@ -397,10 +397,26 @@ class Condition(object):
         return cls(fulfillment, cond['owners_after'], cond['amount'])
 
 
-<<<<<<< d3f1cebbe463c109748ac182fa084eba88eaf756
 class Asset(object):
+    """An Asset is a fungible unit to spend and lock with Transactions.
+
+        Note:
+            Currently, the following flags are not yet fully supported:
+                - `divisible`
+                - `updatable`
+                - `refillable`
+
+        Attributes:
+            data (dict): A dictionary of data that can be added to an Asset.
+            data_id (str): A unique identifier of `data`'s content.
+            divisible (bool): A flag indicating if an Asset can be divided.
+            updatable (bool): A flag indicating if an Asset can be updated.
+            refillable (bool): A flag indicating if an Asset can be refilled.
+    """
+
     def __init__(self, data=None, data_id=None, divisible=False,
                  updatable=False, refillable=False):
+        """An Asset is not required to contain any extra data from outside."""
         self.data = data
         self.data_id = data_id if data_id is not None else self.to_hash()
         self.divisible = divisible
@@ -417,6 +433,12 @@ class Asset(object):
         return self.to_dict() == other_dict
 
     def to_dict(self):
+        """Transforms the object to a Python dictionary.
+
+            Returns:
+                (dict): The Asset object as an alternative serialization
+                    format.
+        """
         return {
             'id': self.data_id,
             'divisible': self.divisible,
@@ -427,16 +449,25 @@ class Asset(object):
 
     @classmethod
     def from_dict(cls, asset):
+        """Transforms a Python dictionary to an Asset object.
+
+            Args:
+                asset (dict): The dictionary to be serialized.
+
+            Returns:
+                :class:`~bigchaindb_common.transaction.Asset`
+        """
         return cls(asset.get('data'), asset['id'],
                    asset.get('divisible', False),
                    asset.get('updatable', False),
                    asset.get('refillable', False))
 
     def to_hash(self):
+        """Generates a unqiue uuid for an Asset"""
         return str(uuid4())
 
     def _validate_asset(self):
-        """Validate digital asset"""
+        """Validates the asset"""
         if self.data is not None and not isinstance(self.data, dict):
             raise TypeError('`data` must be a dict instance or None')
         if not isinstance(self.divisible, bool):
