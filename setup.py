@@ -10,7 +10,7 @@ with open('HISTORY.rst') as history_file:
     history = history_file.read()
 
 install_requires = [
-    'cryptoconditions==0.4.1',
+    'cryptoconditions==0.5.0',
     'python-rapidjson==0.0.6',
     'pysha3==0.3',
 ]
